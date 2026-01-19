@@ -88,11 +88,6 @@ predusk_assignment/
 │   └── .gitignore       # Next.js-specific ignores
 └── README.md            # This file
 ```
-
-## API Documentation
-
-Once the backend is running, visit `http://localhost:8000/docs` for interactive API documentation (Swagger UI).
-
 ## Contributing
 
 1. Fork the repository.
