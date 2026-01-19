@@ -130,7 +130,7 @@ export default function Home() {
           <p className="text-sm text-gray-500">Gemini Flash • Qdrant • Cohere Rerank</p>
         </div>
         <a 
-          href="/resume.pdf" // Put your actual resume in the public folder
+          href="https://drive.google.com/file/d/1rYmoialVAcgpB5IccRfvAhKzZiVY3ePQ/view?usp=sharing" // Put your actual resume in the public folder
           target="_blank" 
           className="text-sm text-blue-600 hover:underline"
         >
