@@ -1,80 +1,158 @@
-# Predusk Assignment
+Predusk Assignment
 
 This project is a full-stack application consisting of a Python backend using FastAPI and a Next.js frontend.
 
-## Overview
+Overview
 
-- **Backend**: Built with FastAPI, provides AI-powered API endpoints using Cohere for language models, Qdrant for vector database, and LangChain for orchestration.
-- **Frontend**: Built with Next.js, provides a modern web interface.
+Backend
 
-## Prerequisites
+Built with FastAPI
 
-- Python 3.8+
-- Node.js 18+
-- npm or yarn
+Uses Gemini Flash (latest) as the Large Language Model (LLM)
 
-## Backend Setup
+Uses Qdrant (Free Tier) as the vector database
 
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
+Uses LangChain for orchestration
 
-2. Create a virtual environment (optional but recommended):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+Hosted locally and exposed using ngrok, as heavy LLM-based services cannot be hosted for free on cloud platforms
 
-3. Install dependencies:
-   ```bash
-   pip install -r req.txt
-   ```
+Frontend
 
-4. Set up environment variables (create a `.env` file if needed):
-   - Configure API keys for Cohere, etc.
+Built with Next.js
 
-5. Run the development server:
-   ```bash
-   uvicorn main:app --reload
-   ```
+Hosted on Vercel
 
-The backend will be available at `http://localhost:8000`.
+Provides a modern and responsive user interface
 
-## Frontend Setup
+Tech Stack
 
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
+LLM: Gemini Flash (latest)
 
-2. Install dependencies:
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+Vector Database: Qdrant (Free Tier)
 
-3. Run the development server:
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
+Backend Framework: FastAPI
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Frontend Framework: Next.js
 
-## Running Both Services
+Hosting
 
-To run both frontend and backend simultaneously:
+Frontend: Vercel
 
-1. Open two terminals.
-2. In one terminal, run the backend as described above.
-3. In the other terminal, run the frontend as described above.
+Backend: Local server + ngrok
 
-## Project Structure
+Prerequisites
 
-```
+Python 3.8+
+
+Node.js 18+
+
+npm or yarn
+
+ngrok (free tier)
+
+Backend Setup
+
+Navigate to the backend directory:
+
+cd backend
+
+
+Create a virtual environment (optional but recommended):
+
+python -m venv venv
+source venv/bin/activate   # On Windows: venv\Scripts\activate
+
+
+Install dependencies:
+
+pip install -r req.txt
+
+
+Set up environment variables (create a .env file):
+
+Gemini API key
+
+Qdrant configuration
+
+Any additional required keys
+
+Run the FastAPI server:
+
+uvicorn main:app --reload
+
+
+Expose the backend using ngrok:
+
+ngrok http 8000
+
+
+The backend will be accessible at:
+
+http://localhost:8000
+
+or via the ngrok-generated public URL
+
+Frontend Setup
+
+Navigate to the frontend directory:
+
+cd frontend
+
+
+Install dependencies:
+
+npm install
+# or
+yarn install
+
+
+Configure environment variables:
+
+Add the ngrok backend URL to .env.local
+
+Run the development server:
+
+npm run dev
+# or
+yarn dev
+
+
+Open the app in your browser:
+
+http://localhost:3000
+
+Deployment
+Frontend (Vercel)
+
+Deployed on Vercel
+
+Environment variables are configured via the Vercel dashboard
+
+Automatically redeploys on each push to the main branch
+
+Backend (Local + ngrok)
+
+Runs locally due to free-tier hosting limitations for heavy LLM workloads
+
+ngrok is used to expose the backend publicly for frontend access
+
+Running Both Services
+
+Open two terminals
+
+Terminal 1:
+
+Run FastAPI
+
+Run ngrok
+
+Terminal 2:
+
+Run the Next.js frontend
+
+Ensure the frontend is pointing to the correct ngrok backend URL
+
+Project Structure
 predusk_assignment/
 ├── backend/
 │   ├── main.py          # FastAPI application
@@ -85,17 +163,21 @@ predusk_assignment/
 │   │   └── app/         # Next.js app directory
 │   ├── package.json     # Node.js dependencies and scripts
 │   ├── next.config.ts   # Next.js configuration
-│   └── .gitignore       # Next.js-specific ignores
-└── README.md            # This file
-```
-## Contributing
+│   └── .gitignore       # Frontend ignores
+└── README.md            # Project documentation
 
-1. Fork the repository.
-2. Create a feature branch.
-3. Make your changes.
-4. Test thoroughly.
-5. Submit a pull request.
+Contributing
 
-## License
+Fork the repository
+
+Create a new feature branch
+
+Make your changes
+
+Test thoroughly
+
+Submit a pull request
+
+License
 
 This project is licensed under the MIT License.
