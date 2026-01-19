@@ -2,20 +2,20 @@ import os
 import shutil
 import time
 import tempfile
+import asyncio
 from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import cohere  # Direct Cohere Client
+import cohere
+from qdrant_client import QdrantClient # Added for manual client connection
 
-# --- LangChain Imports ---
+# --- Imports ---
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# FIXED: New import path to remove the Deprecation Warning
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_qdrant import QdrantVectorStore
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -25,10 +25,9 @@ load_dotenv()
 
 app = FastAPI(title="RAG Assessment API", version="1.0")
 
-# CORS: Allow connection from your Frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, change to your Vercel URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,26 +42,29 @@ def get_cohere_client():
     return cohere.Client(key)
 
 def get_embeddings():
-    # Uses local CPU model (Free, No Rate Limits)
-    # This removes the "429 Resource Exhausted" error from Google
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # USES GOOGLE API (Remote, Lightweight, 768 dimensions)
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise ValueError("GOOGLE_API_KEY missing")
+    return GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
-def get_vectorstore():
+def get_qdrant_client():
     url = os.getenv("QDRANT_URL")
     api_key = os.getenv("QDRANT_API_KEY")
     if not url or not api_key:
         raise ValueError("QDRANT credentials are missing")
+    return QdrantClient(url=url, api_key=api_key)
 
-    return QdrantVectorStore.from_existing_collection(
-        embedding=get_embeddings(),
-        # Collection name matches the 384-dimension size of MiniLM
-        collection_name="rag_assessment_v2", 
-        url=url,
-        api_key=api_key
+def get_vectorstore():
+    # Returns the vectorstore object WITHOUT checking if collection exists yet
+    # This prevents the "Collection not found" crash on startup
+    client = get_qdrant_client()
+    return QdrantVectorStore(
+        client=client,
+        collection_name="rag_google_v4",
+        embedding=get_embeddings()
     )
 
 def get_llm():
-    # Uses the stable Flash alias to avoid "404 Not Found" errors
     return ChatGoogleGenerativeAI(
         model="gemini-flash-latest", 
         temperature=0,
@@ -96,14 +98,13 @@ async def ingest_document(
         if not file and not text:
             raise HTTPException(status_code=400, detail="Provide file or text.")
 
+        # Chunking
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, chunk_overlap=150, add_start_index=True
         )
         splits = []
 
-        # Handle File Upload
         if file:
-            # Create a temporary file safely (Works on Read-Only Cloud Filesystems)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 shutil.copyfileobj(file.file, tmp)
                 temp_path = tmp.name
@@ -111,35 +112,63 @@ async def ingest_document(
             loader = PyPDFLoader(temp_path)
             docs = loader.load()
             splits = text_splitter.split_documents(docs)
-            
-            # Attach metadata
             for split in splits:
                 split.metadata["source"] = file.filename
 
-        # Handle Raw Text Paste
         elif text:
             splits = text_splitter.create_documents(
                 texts=[text], metadatas=[{"source": "User Input"}]
             )
 
-        # Indexing
+        # Indexing with Smart Creation Logic
         if splits:
-            QdrantVectorStore.from_documents(
-                splits,
-                get_embeddings(),
-                url=os.getenv("QDRANT_URL"),
-                api_key=os.getenv("QDRANT_API_KEY"),
-                collection_name="rag_assessment_v2", 
-                force_recreate=False 
-            )
-        
+            batch_size = 20
+            total_batches = len(splits) // batch_size + 1
+            print(f"Ingesting {len(splits)} chunks in {total_batches} batches...")
+
+            # We use the generic client to pass config
+            client = get_qdrant_client()
+            embeddings = get_embeddings()
+            
+            for i in range(0, len(splits), batch_size):
+                batch = splits[i:i+batch_size]
+                if not batch: continue
+                
+                try:
+                    # FIX: If it's the very first batch ever, we use from_documents to CREATE the collection
+                    if i == 0:
+                        QdrantVectorStore.from_documents(
+                            batch,
+                            embeddings,
+                            url=os.getenv("QDRANT_URL"),
+                            api_key=os.getenv("QDRANT_API_KEY"),
+                            collection_name="rag_google_v4",
+                            force_recreate=False # Don't delete if it already exists, just append
+                        )
+                    else:
+                        # For subsequent batches, we just add to existing
+                        vectorstore = get_vectorstore()
+                        vectorstore.add_documents(batch)
+                    
+                    # Sleep to respect Google Rate Limits
+                    await asyncio.sleep(1.0) 
+                    
+                except Exception as e:
+                    print(f"Batch {i} failed: {e}")
+                    # Allow one retry
+                    await asyncio.sleep(5)
+                    try:
+                        vectorstore = get_vectorstore()
+                        vectorstore.add_documents(batch)
+                    except Exception as retry_e:
+                        print(f"Retry failed: {retry_e}")
+
         return {"status": "success", "message": f"Indexed {len(splits)} chunks."}
 
     except Exception as e:
         print(f"Ingest Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup temp file
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
@@ -149,9 +178,18 @@ async def chat_endpoint(request: QueryRequest):
     try:
         vectorstore = get_vectorstore()
         
-        # 1. Retrieve (Get Top 10)
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
-        initial_docs = retriever.invoke(request.query)
+        # 1. Retrieve
+        try:
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+            initial_docs = retriever.invoke(request.query)
+        except Exception as e:
+            # Handle case where collection doesn't exist yet (Chat before Ingest)
+            print(f"Retrieval failed (likely empty DB): {e}")
+            return {
+                "answer": "Please upload a document first.", 
+                "citations": [], 
+                "processing_time": 0
+            }
         
         if not initial_docs:
             return {
@@ -160,7 +198,8 @@ async def chat_endpoint(request: QueryRequest):
                 "processing_time": 0
             }
 
-        # 2. Rerank (Cohere)
+        # 2. Rerank
+        top_docs = []
         try:
             co = get_cohere_client()
             doc_texts = [d.page_content for d in initial_docs]
@@ -172,16 +211,13 @@ async def chat_endpoint(request: QueryRequest):
                 top_n=3
             )
             
-            # Map back to original documents
-            top_docs = []
             for result in rerank_results.results:
                 top_docs.append(initial_docs[result.index])
-
         except Exception as e:
-            print(f"Reranking failed ({str(e)}), falling back to standard retrieval.")
+            print(f"Reranking skipped ({e}), utilizing top retrieved docs.")
             top_docs = initial_docs[:3]
 
-        # 3. Generate (Gemini)
+        # 3. Generate
         context_str = "\n\n".join([d.page_content for d in top_docs])
         
         template = """
@@ -198,7 +234,6 @@ async def chat_endpoint(request: QueryRequest):
         chain = prompt | get_llm() | StrOutputParser()
         answer_text = chain.invoke({"context": context_str, "question": request.query})
         
-        # 4. Format Citations
         citations = [
             {"text": doc.page_content[:200] + "...", "source": doc.metadata.get("source", "Unknown")} 
             for doc in top_docs
@@ -216,6 +251,5 @@ async def chat_endpoint(request: QueryRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # DYNAMIC PORT BINDING (Crucial for Render/Heroku)
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
